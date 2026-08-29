@@ -117,7 +117,7 @@ Start here:
 
 * Windows 11.
 * WidBar installed from the Microsoft Store.
-* .NET 8 SDK.
+* .NET 10 SDK.
 * Visual Studio 2022 or later with the Windows application development workload,
   or equivalent Windows App SDK tooling.
 * Developer Mode enabled for local package deployment.

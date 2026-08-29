@@ -57,7 +57,7 @@ widgets, but without a packaging project of its own:
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <UseWinUI>true</UseWinUI>
     <WinUISDKReferences>false</WinUISDKReferences>
     <Nullable>enable</Nullable>
@@ -92,8 +92,8 @@ widgets, but without a packaging project of its own:
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.2.0" />
-    <PackageReference Include="WidBar.SDK" Version="2.0.0" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.3.1" />
+    <PackageReference Include="WidBar.SDK" Version="2.0.5" />
     <!-- optionally: <ProjectReference Include="..\MyApp.Core\MyApp.Core.csproj" /> -->
   </ItemGroup>
 </Project>

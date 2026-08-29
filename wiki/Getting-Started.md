@@ -4,11 +4,11 @@
 
 You'll need Windows 11 with Developer Mode turned on so you can run unsigned
 local builds. For the toolchain, use Visual Studio 2022+ with the Windows
-application development workload, or the .NET 8 SDK plus Windows App SDK
+application development workload, or the .NET 10 SDK plus Windows App SDK
 tooling if you prefer the command line. You also need WidBar installed from the
 Microsoft Store, since WidBar is the host that discovers and runs widgets.
 
-The generated projects reference `WidBar.SDK` 2.0.0.
+The generated projects target .NET 10 and reference `WidBar.SDK` 2.0.5.
 
 ## Install the templates
 
