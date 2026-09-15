@@ -19,10 +19,11 @@ public sealed class MainPlugin : WidgetPluginBase, IConfigurableWidgetPlugin, IW
     private DateTime _startedAt = DateTime.Now, _mediaPositionReadAt = DateTime.Now;
     private GlobalSystemMediaTransportControlsSessionManager? _mediaManager;
     private GlobalSystemMediaTransportControlsSession? _mediaSession;
-    private string _mediaTitle = "", _mediaArtist = "", _loadedTrackKey = "";
+    private string _mediaTitle = "", _mediaArtist = "", _loadedTrackKey = "", _lyricsTrackKey = "";
     private TimeSpan _mediaPosition, _mediaDuration;
     private GlobalSystemMediaTransportControlsSessionPlaybackStatus _playbackStatus;
     private bool _mediaReady, _refreshingMedia, _loadingLyrics;
+    private int _lyricsRequestVersion;
 
     public override string Id => "com.qiong.widbar.lyrics";
     public override string Name => "Lyrics";
@@ -57,7 +58,10 @@ public sealed class MainPlugin : WidgetPluginBase, IConfigurableWidgetPlugin, IW
         catch { _mediaReady = false; }
     }
 
-    private void OnCurrentSessionChanged(GlobalSystemMediaTransportControlsSessionManager sender, CurrentSessionChangedEventArgs args) { AttachMediaSession(sender.GetCurrentSession()); _loadedTrackKey = ""; _ = RefreshMediaAsync(); }
+    private void OnCurrentSessionChanged(GlobalSystemMediaTransportControlsSessionManager sender, CurrentSessionChangedEventArgs args)
+    {
+        AttachMediaSession(sender.GetCurrentSession()); ResetTrackLyrics(); _ = RefreshMediaAsync();
+    }
     private void AttachMediaSession(GlobalSystemMediaTransportControlsSession? session)
     {
         if (_mediaSession is not null) { _mediaSession.MediaPropertiesChanged -= OnMediaPropertiesChanged; _mediaSession.PlaybackInfoChanged -= OnPlaybackInfoChanged; _mediaSession.TimelinePropertiesChanged -= OnTimelinePropertiesChanged; }
@@ -73,27 +77,44 @@ public sealed class MainPlugin : WidgetPluginBase, IConfigurableWidgetPlugin, IW
         if (_refreshingMedia) return; _refreshingMedia = true;
         try
         {
-            var session = _mediaSession; if (session is null) { _mediaReady = false; return; }
+            var session = _mediaSession; if (session is null) { _mediaReady = false; ResetTrackLyrics(); return; }
             var media = await session.TryGetMediaPropertiesAsync(); var timeline = session.GetTimelineProperties(); var playback = session.GetPlaybackInfo();
             _mediaTitle = media.Title ?? ""; _mediaArtist = media.Artist ?? ""; _mediaPosition = timeline.Position; _mediaDuration = timeline.EndTime; _mediaPositionReadAt = DateTime.Now; _playbackStatus = playback.PlaybackStatus; _mediaReady = true;
             var trackKey = $"{_mediaTitle}|{_mediaArtist}|{Math.Round(_mediaDuration.TotalSeconds)}";
-            if (_settings.AutoFetchLyrics && !string.IsNullOrWhiteSpace(_mediaTitle) && trackKey != _loadedTrackKey) { _loadedTrackKey = trackKey; _ = LoadOnlineLyricsAsync(trackKey); }
+            if (trackKey != _loadedTrackKey)
+            {
+                _loadedTrackKey = trackKey; _lyricsRequestVersion++;
+                if (_settings.AutoFetchLyrics && !string.IsNullOrWhiteSpace(_mediaTitle))
+                {
+                    _lyrics = []; _lyricsTrackKey = ""; _loadingLyrics = true; RefreshLyrics();
+                    _ = LoadOnlineLyricsAsync(trackKey, _lyricsRequestVersion, _mediaTitle, _mediaArtist, _mediaDuration);
+                }
+                else { ParseLyrics(_settings.LrcText); _lyricsTrackKey = trackKey; _loadingLyrics = false; }
+            }
             RefreshLyrics();
         }
         catch { _mediaReady = false; }
         finally { _refreshingMedia = false; }
     }
 
-    private async Task LoadOnlineLyricsAsync(string trackKey)
+    private async Task LoadOnlineLyricsAsync(string trackKey, int requestVersion, string title, string artist, TimeSpan duration)
     {
-        if (_loadingLyrics) return; _loadingLyrics = true; RefreshLyrics();
         try
         {
-            var lrc = await _lyricsProvider.GetSyncedLyricsAsync(_mediaTitle, _mediaArtist, _mediaDuration);
-            if (trackKey != _loadedTrackKey) return;
+            var lrc = await _lyricsProvider.GetSyncedLyricsAsync(title, artist, duration);
+            if (requestVersion != _lyricsRequestVersion || trackKey != _loadedTrackKey) return;
             if (!string.IsNullOrWhiteSpace(lrc)) ParseLyrics(lrc); else ParseLyrics(_settings.LrcText);
+            _lyricsTrackKey = trackKey;
         }
-        finally { _loadingLyrics = false; RefreshLyrics(); }
+        finally
+        {
+            if (requestVersion == _lyricsRequestVersion && trackKey == _loadedTrackKey) { _loadingLyrics = false; RefreshLyrics(); }
+        }
+    }
+
+    private void ResetTrackLyrics()
+    {
+        _lyricsRequestVersion++; _loadedTrackKey = ""; _lyricsTrackKey = ""; _loadingLyrics = false; ParseLyrics(_settings.LrcText); RefreshLyrics();
     }
 
     private TimeSpan RawPlaybackPosition => !_settings.UseWindowsMediaSession || !_mediaReady ? DateTime.Now - _startedAt : _playbackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing ? _mediaPosition + (DateTime.Now - _mediaPositionReadAt) : _mediaPosition;
@@ -143,7 +164,9 @@ public sealed class MainPlugin : WidgetPluginBase, IConfigurableWidgetPlugin, IW
     public override void OnSettingsDraftChanged(string settingsJson)
     {
         var wasMedia = _settings.UseWindowsMediaSession; _settings = Settings.FromJson(settingsJson); ParseLyrics(_settings.LrcText); _startedAt = DateTime.Now;
-        if (_settings.UseWindowsMediaSession && !wasMedia) _ = InitializeMediaAsync(); if (!_settings.UseWindowsMediaSession) _mediaReady = false; if (_settings.AutoFetchLyrics) _loadedTrackKey = "";
+        if (_settings.UseWindowsMediaSession && !wasMedia) _ = InitializeMediaAsync();
+        if (!_settings.UseWindowsMediaSession) { _mediaReady = false; ResetTrackLyrics(); }
+        if (_settings.AutoFetchLyrics) _loadedTrackKey = "";
         if (_previewText is not null) _previewText.FontSize = _settings.FontSize; RefreshLyrics();
     }
 
@@ -156,7 +179,9 @@ public sealed class MainPlugin : WidgetPluginBase, IConfigurableWidgetPlugin, IW
 
     private (string previous, string current, string next) CurrentLyric()
     {
-        if (_loadingLyrics) return ("", "♪ Searching lyrics…", ""); if (_lyrics.Count == 0) return ("", _mediaReady && !string.IsNullOrWhiteSpace(_mediaTitle) ? $"♪ {_mediaTitle}" : "♪ No lyrics", "");
+        if (_loadingLyrics) return ("", "♪ Searching lyrics…", "");
+        if (_settings.UseWindowsMediaSession && _mediaReady && _settings.AutoFetchLyrics && _lyricsTrackKey != _loadedTrackKey) return ("", "♪ Loading track…", "");
+        if (_lyrics.Count == 0) return ("", _mediaReady && !string.IsNullOrWhiteSpace(_mediaTitle) ? $"♪ {_mediaTitle}" : "♪ No lyrics", "");
         var index = _lyrics.FindLastIndex(x => x.Time <= LyricPlaybackPosition); if (index < 0) return ("", _lyrics[0].Text, _lyrics.Count > 1 ? _lyrics[1].Text : ""); return (index > 0 ? _lyrics[index - 1].Text : "", _lyrics[index].Text, index + 1 < _lyrics.Count ? _lyrics[index + 1].Text : "");
     }
 
@@ -172,5 +197,5 @@ public sealed class MainPlugin : WidgetPluginBase, IConfigurableWidgetPlugin, IW
 
     public void OnFlyoutShown() { RefreshLyrics(); _flyoutTimer?.Start(); if (_settings.UseWindowsMediaSession) _ = RefreshMediaAsync(); }
     public void OnFlyoutHidden() => _flyoutTimer?.Stop(); private void OnPreviewVisibilityChanged(object? sender, bool visible) => SetPreviewUpdatesEnabled(visible); private void SetPreviewUpdatesEnabled(bool visible) { if (visible) { RefreshLyrics(); _previewTimer?.Start(); } else _previewTimer?.Stop(); }
-    public override ValueTask DisposeAsync() { if (Context is not null) Context.PreviewVisibilityChanged -= OnPreviewVisibilityChanged; if (_mediaManager is not null) _mediaManager.CurrentSessionChanged -= OnCurrentSessionChanged; AttachMediaSession(null); _previewTimer?.Stop(); _flyoutTimer?.Stop(); return ValueTask.CompletedTask; }
+    public override ValueTask DisposeAsync() { if (Context is not null) Context.PreviewVisibilityChanged -= OnPreviewVisibilityChanged; if (_mediaManager is not null) _mediaManager.CurrentSessionChanged -= OnCurrentSessionChanged; AttachMediaSession(null); _lyricsRequestVersion++; _previewTimer?.Stop(); _flyoutTimer?.Stop(); return ValueTask.CompletedTask; }
 }
