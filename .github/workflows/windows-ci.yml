@@ -1,0 +1,89 @@
+name: Windows CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: windows-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - x64
+          - ARM64
+
+    env:
+      SOLUTION_PATH: templates/standalone/WidBarWidget1.sln
+      CONFIGURATION: Release
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Restore
+        run: >-
+          msbuild "$env:SOLUTION_PATH"
+          /t:Restore
+          /p:Configuration=$env:CONFIGURATION
+          /p:Platform=${{ matrix.platform }}
+
+      - name: Build
+        run: >-
+          msbuild "$env:SOLUTION_PATH"
+          /m
+          /p:Configuration=$env:CONFIGURATION
+          /p:Platform=${{ matrix.platform }}
+          /p:GenerateAppxPackageOnBuild=true
+          /p:AppxPackageSigningEnabled=false
+
+      - name: Stage artifacts
+        shell: pwsh
+        run: |
+          $platform = "${{ matrix.platform }}"
+          $artifactRoot = Join-Path $env:RUNNER_TEMP "widbar-widget-lrc-$platform"
+          New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
+
+          $paths = @(
+            "templates/standalone/WidBarWidget1.ExtensionApp/bin/$platform/$env:CONFIGURATION",
+            "templates/standalone/WidBarWidget1 (Package)/bin/$platform/$env:CONFIGURATION",
+            "templates/standalone/WidBarWidget1 (Package)/AppPackages"
+          )
+
+          foreach ($path in $paths) {
+            if (Test-Path $path) {
+              $leaf = Split-Path $path -Leaf
+              if ($leaf -eq $env:CONFIGURATION) {
+                $leaf = (Split-Path (Split-Path $path -Parent) -Leaf) + "-$leaf"
+              }
+              Copy-Item -Path $path -Destination (Join-Path $artifactRoot $leaf) -Recurse -Force
+            }
+          }
+
+          Get-ChildItem -Path $artifactRoot -Recurse | Select-Object FullName, Length
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: widbar-widget-lrc-${{ matrix.platform }}
+          path: ${{ runner.temp }}/widbar-widget-lrc-${{ matrix.platform }}
+          if-no-files-found: error
