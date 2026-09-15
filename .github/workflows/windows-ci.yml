@@ -20,9 +20,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform:
-          - x64
-          - ARM64
+        include:
+          - platform: x64
+            runtime: win-x64
+          - platform: ARM64
+            runtime: win-arm64
 
     env:
       SOLUTION_PATH: templates/standalone/WidBarWidget1.sln
@@ -46,6 +48,7 @@ jobs:
           /t:Restore
           /p:Configuration=$env:CONFIGURATION
           /p:Platform=${{ matrix.platform }}
+          /p:RuntimeIdentifier=${{ matrix.runtime }}
 
       - name: Build
         run: >-
@@ -53,6 +56,7 @@ jobs:
           /m
           /p:Configuration=$env:CONFIGURATION
           /p:Platform=${{ matrix.platform }}
+          /p:RuntimeIdentifier=${{ matrix.runtime }}
           /p:GenerateAppxPackageOnBuild=true
           /p:AppxPackageSigningEnabled=false
 
