@@ -1,157 +1,132 @@
-# WidBar Widget Templates
+# WidBar Lyrics
 
-Build Windows 11 taskbar widgets for
-[WidBar](https://apps.microsoft.com/detail/9PKLDNM83TP9) with WinUI 3, C# and the
-Windows App SDK.
+A Windows 11 taskbar lyrics widget for [WidBar](https://apps.microsoft.com/detail/9PKLDNM83TP9), built with WinUI 3, C# and `WidBar.SDK`.
 
-These templates use the official `WidBar.SDK` 2.0 contract. A widget provides
-normal WinUI `UIElement` content for the taskbar preview, flyout and optional
-settings page. WidBar handles discovery, placement, per-instance settings,
-automatic light and dark themes, smart stacks, logs and process recovery.
+WidBar Lyrics follows the media currently exposed through Windows System Media Transport Controls and displays synchronized LRC lyrics directly on the taskbar. Clicking the widget opens a richer flyout with song information, surrounding lyric lines and playback controls.
 
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/9e463b8d-4692-4cd8-a128-fab4a3474d33" width="200" height="240" alt="Screenshot 1">
-  <img src="https://github.com/user-attachments/assets/0c1ef7af-9be5-4e89-867e-7ba89517d4bd" width="200" height="198" alt="Screenshot 2">
-  <img src="https://github.com/user-attachments/assets/934b6043-616d-4981-abad-fa721e63d917" width="200" height="262" alt="Screenshot 3">
-  <img src="https://github.com/user-attachments/assets/95e29b25-453c-4ce8-adf7-f4350a26170d" width="200" height="227" alt="Screenshot 4">
-</p>
+## Features
 
-Developer community: https://discord.com/invite/JxyNUmznt
+- Live single-line lyrics on the Windows 11 taskbar
+- Automatic current song and artist detection through Windows media sessions
+- Automatic synchronized lyric lookup with LRCLIB
+- Manual LRC fallback when online lyrics are unavailable
+- Previous / play-pause / next media controls
+- Previous, current and next lyric lines in the flyout
+- Adjustable lyric timing offset from -10s to +10s
+- Adjustable taskbar lyric font size
+- Acrylic flyout UI
+- x64 and ARM64 builds
 
-This repo contains two `dotnet new` templates:
+## How it works
 
-```text
-templates/standalone/   widbar-widget: a standalone widget package
-templates/companion/    widbar-companion: a widget exe for an existing app package
-```
+1. A supported player exposes its current session to Windows.
+2. The widget reads title, artist, playback state, duration and timeline position.
+3. When the track changes, the widget attempts to retrieve synchronized LRC lyrics.
+4. Lyrics are matched against the current playback position and updated on the taskbar.
+5. If synchronized lyrics cannot be found, the configured manual LRC text is used as fallback.
 
-## Install the templates
+Media-session availability depends on the player. Browsers and music applications that integrate with Windows media controls generally work best.
 
-From this repository folder:
+## Settings
 
-```powershell
-dotnet new install .
-```
+### Sync with Windows current media
 
-## Create a standalone widget
+Enabled by default. Uses the active Windows media session instead of the widget's manual timer.
 
-Use this when you want a dedicated Microsoft Store package for your widget.
+### Automatically fetch synced lyrics
 
-```powershell
-dotnet new widbar-widget -n Contoso.Weather `
-    --PluginId com.contoso.weather `
-    --DisplayName "Contoso Weather"
-```
+Enabled by default. Attempts to find synchronized lyrics for the current title, artist and duration.
 
-This creates:
+### Lyrics timing offset
 
-```text
-Contoso.Weather.ExtensionApp/    widget process and plugin code
-Contoso.Weather (Package)/       MSIX packaging project to publish
-```
+Adjust from `-10.0` to `+10.0` seconds in 0.1-second increments.
 
-## Create a companion widget
+- Positive values show lyrics earlier.
+- Negative values show lyrics later.
 
-Use this when you already have a packaged WinUI app and want to ship a WidBar
-widget inside the same MSIX. It is a good fit when your app already owns the
-data or services that the widget needs.
+### Fallback song title
 
-Examples:
+Displayed when no Windows media session is available.
 
-- A music app can expose playback controls on the taskbar.
-- A productivity app can expose timers, tasks, or quick actions.
-- A monitoring app can expose live status and detailed flyouts.
-- A finance app can expose prices, watchlists, or alerts.
-- A communication app can expose presence, unread counts, or shortcuts.
+### Fallback / manual LRC lyrics
 
-```powershell
-dotnet new widbar-companion -n Contoso.App `
-    --PluginId com.contoso.app.companion `
-    --DisplayName "Contoso App"
-```
-
-This creates:
+Paste standard LRC content such as:
 
 ```text
-Contoso.App.Widget/              tiny widget exe to add to your app package
+[00:10.20]First lyric line
+[00:14.80]Second lyric line
+[00:18.50]Third lyric line
 ```
 
-Add the generated project to your existing solution, reference it from your
-`.wapproj`, link its generated `obj\widbar\plugin.json` into
-`Public\plugin.json`, and add a second hidden `<Application>` entry with the
-`com.widbar.widget` AppExtension.
+Multiple timestamps on one line are supported.
 
-The full walkthrough is in [Companion Widgets](wiki/Companion-Widgets.md).
+### Taskbar lyric font size
 
-## What a widget can provide
+Adjust the compact taskbar lyric size between 11 and 24.
 
-A WidBar widget can expose three WinUI surfaces:
+## Build
 
-* Taskbar preview: compact content shown in a free space on the Windows taskbar.
-* Flyout: a rich interactive window opened when the user clicks the preview.
-* Settings: optional configuration UI hosted by WidBar with Save and Cancel.
+### Requirements
 
-The preview can contain live controls and lightweight animations. Flyouts can
-host richer controls, pickers and third-party UI libraries. Standard WinUI
-theme resources update automatically with the Windows theme.
+- Windows 11
+- WidBar
+- .NET 10 SDK
+- Visual Studio / MSBuild with Windows App SDK tooling
+- Developer Mode enabled for local package deployment
 
-Widgets can also take part in smart stacks. They can pause preview-only work
-while another stack member is visible and request attention when an important
-event occurs.
+Clone the repository and build the standalone solution:
 
-## Documentation
-
-The full developer guide is in the
-[GitHub wiki](https://github.com/andelby/widbar-widget-template/wiki). The
-source pages are also available in [`wiki/`](wiki/).
-
-Start here:
-
-* [Getting Started](wiki/Getting-Started.md)
-* [Plugin Contract](wiki/Plugin-Contract.md)
-* [Preview, Flyout and Settings](wiki/Preview-Flyout-Settings.md)
-* [Companion Widgets](wiki/Companion-Widgets.md)
-* [Packaging and Publishing](wiki/Packaging-and-Publishing.md)
-
-## Prerequisites
-
-* Windows 11.
-* WidBar installed from the Microsoft Store.
-* .NET 10 SDK.
-* Visual Studio 2022 or later with the Windows application development workload,
-  or equivalent Windows App SDK tooling.
-* Developer Mode enabled for local package deployment.
-
-## The plugin in 30 seconds
-
-```csharp
-public sealed class WeatherPlugin : WidgetPluginBase, IConfigurableWidgetPlugin
-{
-    public override string Id => "com.contoso.weather";
-    public override string Name => "Weather";
-    public override int PreviewLogicalWidth => 180;
-    public override WidgetFlyoutBackdrop FlyoutBackdrop =>
-        WidgetFlyoutBackdrop.Mica;
-
-    public override UIElement? CreatePreviewContent() => new WeatherPreviewView();
-
-    public override UIElement? CreateFlyoutContent() => new WeatherFlyoutView();
-
-    public UIElement? CreateSettingsContent(IWidgetSettingsContext context) =>
-        new WeatherSettingsView(context);
-}
+```powershell
+git clone https://github.com/hq970123/widbar-widget-lrc.git
+cd widbar-widget-lrc
+msbuild "templates/standalone/WidBarWidget1.sln" /t:Restore /p:Configuration=Release /p:Platform=x64 /p:RuntimeIdentifier=win-x64
+msbuild "templates/standalone/WidBarWidget1.sln" /m /p:Configuration=Release /p:Platform=x64 /p:RuntimeIdentifier=win-x64 /p:GenerateAppxPackageOnBuild=true /p:AppxPackageSigningEnabled=false
 ```
 
-The catalog manifest is generated at build time from the `WidBarPlugin*`
-properties in the widget project file. Description and category belong there,
-not on the runtime plugin class.
+For ARM64, use:
 
-## Links
+```text
+/p:Platform=ARM64 /p:RuntimeIdentifier=win-arm64
+```
 
-* SDK package: https://www.nuget.org/packages/WidBar.SDK
-* WidBar on the Store: https://apps.microsoft.com/detail/9PKLDNM83TP9
-* Widget showcase: [https://andelby.github.io/widbar/](https://github.com/andelby/widbar)
+## CI builds
+
+Every push to `main` is built on GitHub Actions for both x64 and ARM64. Successful runs upload build artifacts named:
+
+```text
+widbar-widget-lrc-x64
+widbar-widget-lrc-ARM64
+```
+
+Open the repository's **Actions → Windows CI** page to download artifacts from a successful run.
+
+## Current limitations
+
+- Automatic lyrics depend on an external lyrics provider and may not be available for every song.
+- Some applications do not expose complete title, artist, duration or playback controls to Windows.
+- Track-title formatting from browsers or web players can affect automatic lyric matching.
+- The current online lyric cache is in memory and resets when the widget process restarts.
+
+## Project
+
+The standalone widget implementation lives in:
+
+```text
+templates/standalone/WidBarWidget1.ExtensionApp/
+```
+
+Important files:
+
+- `MainPlugin.cs` — widget UI, media synchronization, LRC parsing and playback controls
+- `LyricsProvider.cs` — synchronized lyric lookup
+- `WidBarWidget1.ExtensionApp.csproj` — widget metadata and build configuration
+
+## Credits
+
+Built from the [WidBar Widget Template](https://github.com/andelby/widbar-widget-template).
+
+Lyrics lookup currently uses the public LRCLIB service.
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
