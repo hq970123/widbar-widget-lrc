@@ -12,7 +12,8 @@ public sealed class MainPlugin : WidgetPluginBase, IConfigurableWidgetPlugin, IW
 {
     private Settings _settings = new();
     private readonly LyricsProvider _lyricsProvider = new();
-    private TextBlock? _previewText, _titleText, _previousText, _currentText, _nextText, _statusText;
+    private NowPlayingPreview? _nowPlayingPreview;
+    private TextBlock? _titleText, _previousText, _currentText, _nextText, _statusText;
     private Button? _previousButton, _playPauseButton, _nextButton;
     private DispatcherTimer? _previewTimer, _flyoutTimer;
     private List<LrcLine> _lyrics = [];
@@ -27,7 +28,7 @@ public sealed class MainPlugin : WidgetPluginBase, IConfigurableWidgetPlugin, IW
 
     public override string Id => "com.qiong.widbar.lyrics";
     public override string Name => "Lyrics";
-    public override int PreviewLogicalWidth => 320;
+    public override int PreviewLogicalWidth => 500;
     public override int FlyoutWidth => 440;
     public override int FlyoutHeight => 370;
     public override WidgetFlyoutBackdrop FlyoutBackdrop => WidgetFlyoutBackdrop.Acrylic;
@@ -81,6 +82,7 @@ public sealed class MainPlugin : WidgetPluginBase, IConfigurableWidgetPlugin, IW
             var media = await session.TryGetMediaPropertiesAsync(); var timeline = session.GetTimelineProperties(); var playback = session.GetPlaybackInfo();
             _mediaTitle = media.Title ?? ""; _mediaArtist = media.Artist ?? ""; _mediaPosition = timeline.Position; _mediaDuration = timeline.EndTime; _mediaPositionReadAt = DateTime.Now; _playbackStatus = playback.PlaybackStatus; _mediaReady = true;
             var trackKey = $"{_mediaTitle}|{_mediaArtist}|{Math.Round(_mediaDuration.TotalSeconds)}";
+            if (_nowPlayingPreview is not null) _ = _nowPlayingPreview.SetCoverAsync(media.Thumbnail, trackKey);
             if (trackKey != _loadedTrackKey)
             {
                 _loadedTrackKey = trackKey; _lyricsRequestVersion++;
@@ -122,8 +124,14 @@ public sealed class MainPlugin : WidgetPluginBase, IConfigurableWidgetPlugin, IW
 
     public override UIElement? CreatePreviewContent()
     {
-        _previewText = new TextBlock { Text = CurrentLyric().current, FontSize = _settings.FontSize, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Center, TextAlignment = TextAlignment.Center, Margin = new Thickness(8, 0, 8, 0) };
-        var root = new Grid(); root.Children.Add(_previewText); _previewTimer?.Stop(); _previewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) }; _previewTimer.Tick += OnTimerTick; SetPreviewUpdatesEnabled(Context?.IsPreviewVisible ?? true); return root;
+        _nowPlayingPreview = new NowPlayingPreview(_settings.FontSize);
+        _nowPlayingPreview.PreviousClicked += async (_, _) => await RunMediaCommandAsync(s => s.TrySkipPreviousAsync());
+        _nowPlayingPreview.PlayPauseClicked += async (_, _) => await RunMediaCommandAsync(s => s.TryTogglePlayPauseAsync());
+        _nowPlayingPreview.NextClicked += async (_, _) => await RunMediaCommandAsync(s => s.TrySkipNextAsync());
+        RefreshLyrics();
+        _previewTimer?.Stop(); _previewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) }; _previewTimer.Tick += OnTimerTick; SetPreviewUpdatesEnabled(Context?.IsPreviewVisible ?? true);
+        if (_settings.UseWindowsMediaSession) _ = RefreshMediaAsync();
+        return _nowPlayingPreview;
     }
 
     public override UIElement? CreateFlyoutContent()
@@ -167,7 +175,7 @@ public sealed class MainPlugin : WidgetPluginBase, IConfigurableWidgetPlugin, IW
         if (_settings.UseWindowsMediaSession && !wasMedia) _ = InitializeMediaAsync();
         if (!_settings.UseWindowsMediaSession) { _mediaReady = false; ResetTrackLyrics(); }
         if (_settings.AutoFetchLyrics) _loadedTrackKey = "";
-        if (_previewText is not null) _previewText.FontSize = _settings.FontSize; RefreshLyrics();
+        RefreshLyrics();
     }
 
     private void ParseLyrics(string lrcText)
@@ -187,7 +195,9 @@ public sealed class MainPlugin : WidgetPluginBase, IConfigurableWidgetPlugin, IW
 
     private void RefreshLyrics()
     {
-        var line = CurrentLyric(); if (_previewText is not null) _previewText.Text = line.current; if (_previousText is not null) _previousText.Text = line.previous; if (_currentText is not null) _currentText.Text = line.current; if (_nextText is not null) _nextText.Text = line.next;
+        var line = CurrentLyric();
+        if (_nowPlayingPreview is not null) _nowPlayingPreview.Update(_mediaReady && !string.IsNullOrWhiteSpace(_mediaTitle) ? _mediaTitle : _settings.SongTitle, _mediaReady ? _mediaArtist : "", line.current, _playbackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing, _settings.UseWindowsMediaSession && _mediaReady, _settings.FontSize);
+        if (_previousText is not null) _previousText.Text = line.previous; if (_currentText is not null) _currentText.Text = line.current; if (_nextText is not null) _nextText.Text = line.next;
         if (_titleText is not null) _titleText.Text = _mediaReady && !string.IsNullOrWhiteSpace(_mediaTitle) ? string.IsNullOrWhiteSpace(_mediaArtist) ? _mediaTitle : $"{_mediaTitle} · {_mediaArtist}" : _settings.SongTitle;
         var offsetText = Math.Abs(_settings.LyricOffsetSeconds) >= .05 ? $"  Offset {_settings.LyricOffsetSeconds:+0.0;-0.0}s" : "";
         if (_statusText is not null) _statusText.Text = _loadingLyrics ? "Searching synced lyrics…" : _settings.UseWindowsMediaSession ? (_mediaReady ? $"{(_playbackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing ? "Playing" : "Paused")}  {RawPlaybackPosition:mm\\:ss}{offsetText}" : "Waiting for Windows media…") : $"Manual timer  {RawPlaybackPosition:mm\\:ss}{offsetText}";
