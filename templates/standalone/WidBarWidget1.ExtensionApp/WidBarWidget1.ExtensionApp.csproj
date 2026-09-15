@@ -13,27 +13,18 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Platforms>x64;ARM64</Platforms>
     <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
-    <!-- The .NET runtime ships inside the package, so the widget runs on a
-         machine that has no matching runtime installed. Note this alone is not
-         enough for MSIX: the packaging project honours the publish profile, so
-         SelfContained is set in Properties\PublishProfiles\*.pubxml as well. -->
     <SelfContained>true</SelfContained>
-    <!-- The Windows App SDK stays framework-dependent: WidBar already brings
-         that runtime, and carrying a second copy only inflates the package. -->
     <WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
   </PropertyGroup>
 
-  <!-- These properties feed the WidBar SDK build target, which writes
-       obj\widbar\plugin.json at build time. The packaging project picks that
-       file up, so id/name/version only live here. -->
   <PropertyGroup>
-    <WidBarPluginId>com.example.mywidget</WidBarPluginId>
-    <WidBarPluginName>MY-WIDGET-DISPLAY-NAME</WidBarPluginName>
-    <WidBarPluginDescription>Describe your widget here.</WidBarPluginDescription>
-    <WidBarPluginCategory>Utility</WidBarPluginCategory>
-    <WidBarPluginVersion>1.0.0</WidBarPluginVersion>
-    <WidBarPluginPreviewWidth>150</WidBarPluginPreviewWidth>
+    <WidBarPluginId>com.qiong.widbar.lyrics</WidBarPluginId>
+    <WidBarPluginName>Lyrics</WidBarPluginName>
+    <WidBarPluginDescription>Display synchronized LRC lyrics directly on the Windows 11 taskbar.</WidBarPluginDescription>
+    <WidBarPluginCategory>Media</WidBarPluginCategory>
+    <WidBarPluginVersion>0.1.0</WidBarPluginVersion>
+    <WidBarPluginPreviewWidth>320</WidBarPluginPreviewWidth>
     <WidBarPluginConfigurable>true</WidBarPluginConfigurable>
   </PropertyGroup>
 
