@@ -1,230 +1,197 @@
+using System.Globalization;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using WidBar.SDK;
 
 namespace WidBarWidget1.ExtensionApp;
 
-// Sample widget: a clock on the taskbar, a bigger clock in the flyout and a
-// 12/24h toggle in settings. Replace the UI with your own. This code runs in
-// its own process, so feel free to pull in any NuGet or native dependency.
-public sealed class MainPlugin :
-    WidgetPluginBase,
-    IConfigurableWidgetPlugin,
-    IWidgetFlyoutLifecycle
+public sealed class MainPlugin : WidgetPluginBase, IConfigurableWidgetPlugin, IWidgetFlyoutLifecycle
 {
     private Settings _settings = new();
     private TextBlock? _previewText;
-    private TextBlock? _flyoutText;
+    private TextBlock? _titleText;
+    private TextBlock? _previousText;
+    private TextBlock? _currentText;
+    private TextBlock? _nextText;
     private DispatcherTimer? _previewTimer;
     private DispatcherTimer? _flyoutTimer;
+    private List<LrcLine> _lyrics = [];
+    private DateTime _startedAt = DateTime.Now;
 
-    // Catalog metadata (description, category, version) lives in the .csproj
-    // WidBarPlugin* properties -> plugin.json, the single source the WidBar
-    // catalog reads. The plugin class only carries what the runtime needs.
-    public override string Id => "com.example.mywidget";
-    public override string Name => "MY-WIDGET-DISPLAY-NAME";
-
-    public override int PreviewLogicalWidth => 150;
-    public override int FlyoutWidth => 360;
-    public override int FlyoutHeight => 240;
+    public override string Id => "com.qiong.widbar.lyrics";
+    public override string Name => "Lyrics";
+    public override int PreviewLogicalWidth => 320;
+    public override int FlyoutWidth => 440;
+    public override int FlyoutHeight => 300;
     public override WidgetFlyoutBackdrop FlyoutBackdrop => WidgetFlyoutBackdrop.Acrylic;
 
     private sealed class Settings
     {
-        public bool Use24h { get; set; } = true;
+        public string LrcText { get; set; } = "[00:00.00]♪ Lyrics\n[00:03.00]Paste LRC in settings\n[00:07.00]Lyrics will follow playback time";
+        public string SongTitle { get; set; } = "Lyrics Widget";
+        public double FontSize { get; set; } = 15;
 
         public static Settings FromJson(string? json)
         {
-            try
-            {
-                return string.IsNullOrWhiteSpace(json)
-                    ? new Settings()
-                    : JsonSerializer.Deserialize<Settings>(json) ?? new Settings();
-            }
-            catch
-            {
-                return new Settings();
-            }
+            try { return string.IsNullOrWhiteSpace(json) ? new Settings() : JsonSerializer.Deserialize<Settings>(json) ?? new Settings(); }
+            catch { return new Settings(); }
         }
-
         public string ToJson() => JsonSerializer.Serialize(this);
     }
 
-    private string TimeText => DateTime.Now.ToString(_settings.Use24h ? "HH:mm:ss" : "hh:mm:ss tt");
+    private sealed record LrcLine(TimeSpan Time, string Text);
 
     public override async Task InitializeAsync(IWidgetContext context)
     {
         _settings = Settings.FromJson(context.SettingsJson);
+        ParseLyrics();
+        _startedAt = DateTime.Now;
         await base.InitializeAsync(context);
         context.PreviewVisibilityChanged += OnPreviewVisibilityChanged;
     }
 
-    // Taskbar preview. Return a compact WinUI element sized for a taskbar slot.
-    // Hover, placement and click-to-open are handled on the WidBar side.
     public override UIElement? CreatePreviewContent()
     {
         _previewText = new TextBlock
         {
-            Text = TimeText,
-            FontSize = 16,
+            Text = CurrentLyric().current,
+            FontSize = _settings.FontSize,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            HorizontalAlignment = HorizontalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            MaxLines = 1,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Center,
+            TextAlignment = TextAlignment.Center,
+            Margin = new Thickness(8, 0, 8, 0)
         };
-
-        var root = new Grid
-        {
-            Background = null,
-        };
+        var root = new Grid();
         root.Children.Add(_previewText);
-
         _previewTimer?.Stop();
-        _previewTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        _previewTimer.Tick += OnPreviewTimerTick;
+        _previewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+        _previewTimer.Tick += (_, _) => RefreshLyrics();
         SetPreviewUpdatesEnabled(Context?.IsPreviewVisible ?? true);
-
         return root;
     }
 
-    // Flyout shown when the user clicks the preview. This is a real window,
-    // so anything goes: scrolling, input, Win2D, whatever you need.
     public override UIElement? CreateFlyoutContent()
     {
-        _flyoutText = new TextBlock
-        {
-            Text = TimeText,
-            FontSize = 40,
-            HorizontalAlignment = HorizontalAlignment.Center,
-        };
+        _titleText = new TextBlock { Text = _settings.SongTitle, FontSize = 14, Opacity = .65, HorizontalAlignment = HorizontalAlignment.Center };
+        _previousText = LyricText(16, .45);
+        _currentText = LyricText(24, 1);
+        _currentText.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
+        _nextText = LyricText(16, .45);
+
+        var panel = new StackPanel { Spacing = 16, Padding = new Thickness(24), VerticalAlignment = VerticalAlignment.Center };
+        panel.Children.Add(_titleText);
+        panel.Children.Add(_previousText);
+        panel.Children.Add(_currentText);
+        panel.Children.Add(_nextText);
+        RefreshLyrics();
 
         _flyoutTimer?.Stop();
-        _flyoutTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        _flyoutTimer.Tick += OnFlyoutTimerTick;
-
-        var panel = new StackPanel
-        {
-            Spacing = 12,
-            Padding = new Thickness(24),
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        panel.Children.Add(_flyoutText);
-        panel.Children.Add(new TextBlock
-        {
-            Text = "MY-WIDGET-DISPLAY-NAME",
-            HorizontalAlignment = HorizontalAlignment.Center,
-            Opacity = 0.6,
-        });
-
+        _flyoutTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+        _flyoutTimer.Tick += (_, _) => RefreshLyrics();
         return panel;
     }
 
-    // Settings UI. The SDK hosts it in a window with Save/Cancel buttons and
-    // opens it from the WidBar app or from the gear in the flyout. Call
-    // SaveSettings on every change so the draft stays current.
+    private static TextBlock LyricText(double size, double opacity) => new()
+    {
+        FontSize = size,
+        Opacity = opacity,
+        TextAlignment = TextAlignment.Center,
+        TextWrapping = TextWrapping.Wrap,
+        HorizontalAlignment = HorizontalAlignment.Stretch
+    };
+
     public UIElement? CreateSettingsContent(IWidgetSettingsContext context)
     {
         var draft = Settings.FromJson(context.SettingsJson);
+        var title = new TextBox { Header = "Song title", Text = draft.SongTitle };
+        var lrc = new TextBox { Header = "LRC lyrics", Text = draft.LrcText, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 180 };
+        var font = new Slider { Header = "Taskbar lyric font size", Minimum = 11, Maximum = 24, Value = draft.FontSize, StepFrequency = 1 };
 
-        var toggle = new ToggleSwitch
+        void Save()
         {
-            Header = "Use 24-hour clock",
-            IsOn = draft.Use24h,
-        };
-        toggle.Toggled += (_, _) =>
-        {
-            draft.Use24h = toggle.IsOn;
+            draft.SongTitle = title.Text;
+            draft.LrcText = lrc.Text;
+            draft.FontSize = font.Value;
             context.SaveSettings(draft.ToJson());
             context.RequestPreviewRefresh();
-        };
+        }
+        title.TextChanged += (_, _) => Save();
+        lrc.TextChanged += (_, _) => Save();
+        font.ValueChanged += (_, _) => Save();
 
         var panel = new StackPanel { Spacing = 16 };
-        panel.Children.Add(toggle);
+        panel.Children.Add(title); panel.Children.Add(lrc); panel.Children.Add(font);
         return panel;
     }
 
-    // Called while the user edits settings (and again with the original JSON
-    // if they cancel). Apply the draft so the taskbar preview updates live.
     public override void OnSettingsDraftChanged(string settingsJson)
     {
         _settings = Settings.FromJson(settingsJson);
-        if (_previewText is not null)
-        {
-            _previewText.Text = TimeText;
-        }
-
-        if (_flyoutText is not null)
-        {
-            _flyoutText.Text = TimeText;
-        }
+        ParseLyrics();
+        _startedAt = DateTime.Now;
+        if (_previewText is not null) _previewText.FontSize = _settings.FontSize;
+        if (_titleText is not null) _titleText.Text = _settings.SongTitle;
+        RefreshLyrics();
     }
 
-    public void OnFlyoutShown()
+    private void ParseLyrics()
     {
-        if (_flyoutText is not null)
+        var result = new List<LrcLine>();
+        var regex = new Regex(@"\[(\d{1,3}):(\d{2})(?:[\.:](\d{1,3}))?\]", RegexOptions.Compiled);
+        foreach (var raw in _settings.LrcText.Replace("\r", "").Split('\n'))
         {
-            _flyoutText.Text = TimeText;
+            var matches = regex.Matches(raw);
+            if (matches.Count == 0) continue;
+            var text = regex.Replace(raw, "").Trim();
+            foreach (Match m in matches)
+            {
+                var min = int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
+                var sec = int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture);
+                var fraction = m.Groups[3].Success ? m.Groups[3].Value : "0";
+                var ms = fraction.Length switch { 1 => int.Parse(fraction) * 100, 2 => int.Parse(fraction) * 10, _ => int.Parse(fraction[..Math.Min(3, fraction.Length)]) };
+                result.Add(new LrcLine(TimeSpan.FromMilliseconds((min * 60 + sec) * 1000 + ms), text));
+            }
         }
-
-        _flyoutTimer?.Start();
+        _lyrics = result.OrderBy(x => x.Time).ToList();
     }
 
-    public void OnFlyoutHidden()
+    private (string previous, string current, string next) CurrentLyric()
     {
-        _flyoutTimer?.Stop();
+        if (_lyrics.Count == 0) return ("", "♪ No lyrics", "");
+        var position = DateTime.Now - _startedAt;
+        var index = _lyrics.FindLastIndex(x => x.Time <= position);
+        if (index < 0) return ("", _lyrics[0].Text, _lyrics.Count > 1 ? _lyrics[1].Text : "");
+        return (index > 0 ? _lyrics[index - 1].Text : "", _lyrics[index].Text, index + 1 < _lyrics.Count ? _lyrics[index + 1].Text : "");
+    }
+
+    private void RefreshLyrics()
+    {
+        var line = CurrentLyric();
+        if (_previewText is not null) _previewText.Text = line.current;
+        if (_previousText is not null) _previousText.Text = line.previous;
+        if (_currentText is not null) _currentText.Text = line.current;
+        if (_nextText is not null) _nextText.Text = line.next;
+    }
+
+    public void OnFlyoutShown() { RefreshLyrics(); _flyoutTimer?.Start(); }
+    public void OnFlyoutHidden() => _flyoutTimer?.Stop();
+
+    private void OnPreviewVisibilityChanged(object? sender, bool visible) => SetPreviewUpdatesEnabled(visible);
+    private void SetPreviewUpdatesEnabled(bool visible)
+    {
+        if (visible) { RefreshLyrics(); _previewTimer?.Start(); }
+        else _previewTimer?.Stop();
     }
 
     public override ValueTask DisposeAsync()
     {
-        if (Context is not null)
-        {
-            Context.PreviewVisibilityChanged -= OnPreviewVisibilityChanged;
-        }
-
-        _previewTimer?.Stop();
-        _flyoutTimer?.Stop();
-        _previewTimer = null;
-        _flyoutTimer = null;
-        _previewText = null;
-        _flyoutText = null;
+        if (Context is not null) Context.PreviewVisibilityChanged -= OnPreviewVisibilityChanged;
+        _previewTimer?.Stop(); _flyoutTimer?.Stop();
         return ValueTask.CompletedTask;
-    }
-
-    private void OnPreviewVisibilityChanged(object? sender, bool isVisible)
-    {
-        SetPreviewUpdatesEnabled(isVisible);
-    }
-
-    private void SetPreviewUpdatesEnabled(bool isVisible)
-    {
-        if (isVisible)
-        {
-            if (_previewText is not null)
-            {
-                _previewText.Text = TimeText;
-            }
-
-            _previewTimer?.Start();
-        }
-        else
-        {
-            _previewTimer?.Stop();
-        }
-    }
-
-    private void OnPreviewTimerTick(object? sender, object e)
-    {
-        if (_previewText is not null)
-        {
-            _previewText.Text = TimeText;
-        }
-    }
-
-    private void OnFlyoutTimerTick(object? sender, object e)
-    {
-        if (_flyoutText is not null)
-        {
-            _flyoutText.Text = TimeText;
-        }
     }
 }
