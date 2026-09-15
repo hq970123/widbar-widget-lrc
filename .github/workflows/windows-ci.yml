@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
   pull_request:
     branches:
       - main
@@ -85,9 +87,57 @@ jobs:
 
           Get-ChildItem -Path $artifactRoot -Recurse | Select-Object FullName, Length
 
+      - name: Create release ZIP
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $platform = "${{ matrix.platform }}"
+          $artifactRoot = Join-Path $env:RUNNER_TEMP "widbar-widget-lrc-$platform"
+          $zipPath = Join-Path $env:RUNNER_TEMP "widbar-widget-lrc-${{ github.ref_name }}-$platform.zip"
+          Compress-Archive -Path "$artifactRoot\*" -DestinationPath $zipPath -Force
+          Get-Item $zipPath | Select-Object FullName, Length
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: widbar-widget-lrc-${{ matrix.platform }}
           path: ${{ runner.temp }}/widbar-widget-lrc-${{ matrix.platform }}
           if-no-files-found: error
+
+      - name: Upload release ZIP
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}
+          path: ${{ runner.temp }}/widbar-widget-lrc-${{ github.ref_name }}-${{ matrix.platform }}.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: List release assets
+        run: ls -lah release-assets
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${{ github.ref_name }}"
+          release-assets/*.zip
+          --repo "${{ github.repository }}"
+          --title "WidBar Lyrics ${{ github.ref_name }}"
+          --generate-notes
+          --verify-tag
