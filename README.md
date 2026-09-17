@@ -27,6 +27,29 @@ WidBar Lyrics follows the media currently exposed through Windows System Media T
 
 Media-session availability depends on the player. Browsers and music applications that integrate with Windows media controls generally work best.
 
+## Install from GitHub Actions (sideload)
+
+1. Open [Actions → Windows CI](https://github.com/hq970123/widbar-widget-lrc/actions/workflows/windows-ci.yml) and pick a successful run.
+2. Download the artifact for your CPU:
+   - `widbar-widget-lrc-x64` or `widbar-widget-lrc-ARM64`
+3. Unzip it. You will see:
+   - `msix/` — signed-off (unsigned) `.msix` packages
+   - `sideload/` — loose layout with `AppxManifest.xml`
+4. Enable **Developer Mode** in Windows Settings.
+5. Install either way:
+
+```powershell
+# Option A: register loose layout (recommended while developing)
+Add-AppxPackage -Register .\sideload\AppxManifest.xml
+
+# Option B: install the MSIX (may require developer cert trust)
+Add-AppxPackage .\msix\*.msix
+```
+
+6. Start **WidBar**, open the widget catalog, and add **WidBar Lyrics** to the taskbar.
+
+> Publisher is currently `CN=Developer` (unsigned). For Store / trusted install, replace the Identity Publisher and sign with your certificate.
+
 ## Settings
 
 ### Sync with Windows current media
@@ -98,7 +121,14 @@ widbar-widget-lrc-x64
 widbar-widget-lrc-ARM64
 ```
 
+Each artifact contains:
+
+- `msix/` — installable package files
+- `sideload/` — loose layout for `Add-AppxPackage -Register`
+
 Open the repository's **Actions → Windows CI** page to download artifacts from a successful run.
+
+Tag a commit as `v*` (for example `v0.1.0`) to also publish a GitHub Release with zipped packages.
 
 ## Current limitations
 
@@ -120,6 +150,7 @@ Important files:
 - `MainPlugin.cs` — widget UI, media synchronization, LRC parsing and playback controls
 - `LyricsProvider.cs` — synchronized lyric lookup
 - `WidBarWidget1.ExtensionApp.csproj` — widget metadata and build configuration
+- `WidBarWidget1 (Package)/Package.appxmanifest` — MSIX identity and AppExtension declaration
 
 ## Credits
 
@@ -129,4 +160,4 @@ Lyrics lookup currently uses the public LRCLIB service.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT.
