@@ -61,31 +61,51 @@ jobs:
           /p:RuntimeIdentifier=${{ matrix.runtime }}
           /p:GenerateAppxPackageOnBuild=true
           /p:AppxPackageSigningEnabled=false
+          /p:AppxBundle=Never
 
       - name: Stage artifacts
         shell: pwsh
         run: |
           $platform = "${{ matrix.platform }}"
           $artifactRoot = Join-Path $env:RUNNER_TEMP "widbar-widget-lrc-$platform"
-          New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
+          $msixDir = Join-Path $artifactRoot "msix"
+          $sideloadDir = Join-Path $artifactRoot "sideload"
+          New-Item -ItemType Directory -Path $msixDir -Force | Out-Null
+          New-Item -ItemType Directory -Path $sideloadDir -Force | Out-Null
 
-          $paths = @(
-            "templates/standalone/WidBarWidget1.ExtensionApp/bin/$platform/$env:CONFIGURATION",
-            "templates/standalone/WidBarWidget1 (Package)/bin/$platform/$env:CONFIGURATION",
-            "templates/standalone/WidBarWidget1 (Package)/AppPackages"
-          )
-
-          foreach ($path in $paths) {
-            if (Test-Path $path) {
-              $leaf = Split-Path $path -Leaf
-              if ($leaf -eq $env:CONFIGURATION) {
-                $leaf = (Split-Path (Split-Path $path -Parent) -Leaf) + "-$leaf"
+          $appPackages = "templates/standalone/WidBarWidget1 (Package)/AppPackages"
+          if (Test-Path $appPackages) {
+            Get-ChildItem -Path $appPackages -Recurse -Include *.msix,*.msixbundle,*.appx,*.appxbundle |
+              ForEach-Object {
+                Copy-Item $_.FullName -Destination $msixDir -Force
+                Write-Host "Packaged: $($_.Name) ($([math]::Round($_.Length/1MB, 2)) MB)"
               }
-              Copy-Item -Path $path -Destination (Join-Path $artifactRoot $leaf) -Recurse -Force
+          }
+
+          # Loose layout for Developer Mode sideload (Add-AppxPackage -Register)
+          $pkgBin = "templates/standalone/WidBarWidget1 (Package)/bin/$platform/$env:CONFIGURATION"
+          if (Test-Path $pkgBin) {
+            $layout = Get-ChildItem -Path $pkgBin -Directory -Recurse -Filter "AppxManifest.xml" |
+              Select-Object -First 1
+            if ($layout) {
+              $layoutRoot = $layout.DirectoryName
+              Copy-Item -Path "$layoutRoot\*" -Destination $sideloadDir -Recurse -Force
+              Write-Host "Sideload layout from: $layoutRoot"
             }
           }
 
-          Get-ChildItem -Path $artifactRoot -Recurse | Select-Object FullName, Length
+          # Fallback: copy AppPackages tree if no individual packages found
+          if (-not (Get-ChildItem $msixDir -ErrorAction SilentlyContinue)) {
+            if (Test-Path $appPackages) {
+              Copy-Item -Path $appPackages -Destination (Join-Path $artifactRoot "AppPackages") -Recurse -Force
+              Write-Host "Copied full AppPackages tree as fallback"
+            }
+          }
+
+          Write-Host "--- Artifact tree ---"
+          Get-ChildItem -Path $artifactRoot -Recurse -File |
+            Select-Object @{N='Rel';E={$_.FullName.Substring($artifactRoot.Length+1)}}, @{N='MB';E={[math]::Round($_.Length/1MB,2)}} |
+            Format-Table -AutoSize | Out-String | Write-Host
 
       - name: Create release ZIP
         if: startsWith(github.ref, 'refs/tags/v')
